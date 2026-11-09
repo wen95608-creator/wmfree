@@ -176,7 +176,11 @@ async function qrPoll(sid){
     if(s.image){ $("qrImg").src = "data:image/png;base64,"+s.image; }
     if(s.state==="starting"){ $("qrStatus").textContent="启动浏览器,打开登录页…"; }
     else if(s.state==="waiting_scan"){
-      $("qrStatus").innerHTML = "请用 <b>"+$("qrPlatform").value+"</b> App 扫描二维码并确认登录…(5 分钟有效)";
+      let diag = "";
+      if(s.diag){
+        diag = `<br>诊断:页面=${(s.diag.url||"").slice(0,60) || "(未跳转)"} · Cookie=${s.diag.cookie_count}个`;
+      }
+      $("qrStatus").innerHTML = "请用 <b>"+$("qrPlatform").value+"</b> App 扫码,并在手机上点【确认登录】…(5 分钟有效)"+diag;
     }
     else if(s.state==="done"){
       clearInterval(qrTimer);

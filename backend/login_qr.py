@@ -136,8 +136,9 @@ def _run_session(sid: str, platform: str):
             _set(sid, state="waiting_scan",
                  image=base64.b64encode(shot).decode())
 
-            # 轮询关键 cookie 出现即视为登录成功
+            # 轮询登录态:关键 cookie 出现 = 成功;页面跳出登录域且 cookie 较多 = 兜底成功
             deadline = time.time() + TIMEOUT_SEC
+            consec_err = 0
             while time.time() < deadline:
                 if _is_cancelled(sid):
                     ctx.close()
@@ -145,17 +146,46 @@ def _run_session(sid: str, platform: str):
                     return
                 try:
                     cookies = ctx.cookies()
-                    names = {c["name"] for c in cookies}
+                    consec_err = 0
+                    names = sorted({c["name"] for c in cookies})
+                    try:
+                        cur_url = page.url
+                    except Exception:
+                        cur_url = ""
+                    # 诊断信息透传给前端,卡住时能看出卡在哪一步
+                    _set(sid, diag={
+                        "url": cur_url[:150],
+                        "cookie_count": len(cookies),
+                        "cookies": names[:30],
+                    })
+
                     if cfg["key_cookie"] in names:
                         raw = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
                         save_cookie_sync(platform, raw)
-                        _set(sid, state="done",
-                             cookie_names=sorted(names)[:20])
+                        _set(sid, state="done", cookie_names=names[:30])
                         ctx.close()
                         browser.close()
                         return
-                except Exception:
-                    pass
+
+                    # 兜底:页面已跳离 sso/login 域且 cookie 明显变多,视为登录完成
+                    on_login_page = any(d in cur_url for d in (
+                        "sso.douyin.com", "/login", "passport.bilibili.com",
+                        "passport.tiktok.com"))
+                    if not on_login_page and cur_url and len(cookies) >= 10:
+                        raw = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                        save_cookie_sync(platform, raw)
+                        _set(sid, state="done", cookie_names=names[:30])
+                        ctx.close()
+                        browser.close()
+                        return
+                except Exception as e:
+                    consec_err += 1
+                    if consec_err >= 15:
+                        _set(sid, state="failed",
+                             error=f"浏览器状态异常(连续 {consec_err} 次): {type(e).__name__}: {e}")
+                        ctx.close()
+                        browser.close()
+                        return
                 time.sleep(2)
 
             _set(sid, state="expired", error="二维码超时,请重新发起扫码")

@@ -1,0 +1,16 @@
+name: diag-linux
+
+# 诊断用:验证账号能否跑任何 hosted runner
+on:
+  workflow_dispatch:
+  push:
+    paths: [ '.github/workflows/diag-linux.yml' ]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: echo
+        run: |
+          echo "LINUX_RUNNER_OK"
+          uname -a
