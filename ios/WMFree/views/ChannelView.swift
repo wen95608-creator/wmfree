@@ -12,17 +12,18 @@ struct ChannelVideo: Codable, Identifiable {
     let duration: Int
     let fileID: String
     let time: String
+    // 后端下发:embed 直链路径不受 20MB 限制,默认可播
+    let streamable: Bool?
 
     var id: Int { mid }
-    // Bot API getFile 下载上限 20MB
-    var streamable: Bool { fileID != "" && sizeMB <= 19.5 }
+    var canStream: Bool { streamable ?? true }
     var durationText: String {
         let s = max(duration, 0)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     enum CodingKeys: String, CodingKey {
-        case mid, title, platform, duration, time
+        case mid, title, platform, duration, time, streamable
         case sizeMB = "size_mb"
         case fileID = "file_id"
     }
@@ -141,7 +142,7 @@ struct ChannelVideoPage: View {
                 VideoPlayer(player: pl)
                     .ignoresSafeArea()
                     .onTapGesture { togglePlay() }
-            } else if !video.streamable {
+            } else if !video.canStream {
                 tooLargeView
             } else if !loadErr.isEmpty {
                 VStack(spacing: 10) {
@@ -233,7 +234,7 @@ struct ChannelVideoPage: View {
 
     private func prepare() async {
         if player != nil { player?.play(); playing = true; return }
-        guard video.streamable, loading == false else { return }
+        guard video.canStream, loading == false else { return }
         loading = true
         loadErr = ""
         defer { loading = false }
