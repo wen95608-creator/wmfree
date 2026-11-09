@@ -10,7 +10,8 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-14 对新账号有调度限制,依次尝试 macos-latest(当前为 macOS 15/ARM)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
