@@ -109,6 +109,18 @@ async def process(url: str, source: str, chat_id=None, progress_msg=None):
 
     os.remove(path)  # 不在本地保存,发完即删
 
+    # 记录频道视频索引(file_id 供 App 端流式播放)
+    vid = msg.get("video") or {}
+    await store.save_video({
+        "mid": msg.get("message_id"),
+        "title": res.title,
+        "platform": res.platform,
+        "size_mb": round(size_mb, 1),
+        "duration": int(vid.get("duration") or res.duration or 0),
+        "file_id": vid.get("file_id") or "",
+        "time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
     await store.append_history({
         "time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": source,

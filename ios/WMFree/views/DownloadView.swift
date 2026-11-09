@@ -23,6 +23,7 @@ struct DownloadView: View {
                 .padding(16)
             }
             .background(Color(.systemGroupedBackground))
+            .onTapGesture { hideKeyboard() }   // 点空白处收起键盘
             .navigationTitle("WMFree")
             .onAppear(perform: checkClipboard)
         }
@@ -40,6 +41,11 @@ struct DownloadView: View {
                 .lineLimit(2...4)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .submitLabel(.go)
+                .onSubmit {
+                    hideKeyboard()
+                    Task { await go() }
+                }
 
             HStack(spacing: 10) {
                 Button {
@@ -129,6 +135,13 @@ struct DownloadView: View {
         link.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // 收起键盘:解析开始、点空白处、键盘"前往"键三处都会触发
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil)
+    }
+
     private func checkClipboard() {
         // 进前台时检测剪贴板,有链接就提示用户(不自动读内容,避免 iOS 粘贴弹窗打扰)
         let text = UIPasteboard.general.string ?? ""
@@ -139,6 +152,7 @@ struct DownloadView: View {
     }
 
     private func go() async {
+        hideKeyboard()   // 解析一开始就收起键盘,结果卡直接可见
         busy = true
         errMsg = ""
         result = nil

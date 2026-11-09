@@ -2,7 +2,7 @@
 import asyncio
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 import config
 import store
@@ -56,6 +56,46 @@ async def api_parse(body: dict):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"处理异常: {e}"}, status_code=500)
+
+
+# ---------------- 频道视频流(App 端刷视频) ----------------
+
+@app.get("/api/videos")
+async def api_videos():
+    return {"videos": await store.list_videos()}
+
+
+@app.get("/api/videos/{mid}/stream")
+async def api_video_stream(mid: int, range: str | None = Header(default=None, alias="Range")):
+    """代理 Telegram getFile 直链,AVPlayer 可流式播放(Range 透传),token 不暴露。"""
+    import httpx as _httpx
+
+    v = await store.get_video(mid)
+    if not v or not v.get("file_id"):
+        raise HTTPException(status_code=404, detail="视频不存在")
+    r = await tg.tg_call("getFile", data={"file_id": v["file_id"]})
+    if not r.get("ok"):
+        desc = ((r.get("description") or "") + " ") or ""
+        raise HTTPException(status_code=410, detail=(
+            "视频超过 20MB,Bot API 无法流式播放,请在 Telegram 频道查看。" + desc.strip()))
+    fp = r["result"]["file_path"]
+    tgt = f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{fp}"
+
+    fwd = {"Range": range} if range else {}
+    async with _httpx.AsyncClient(timeout=_httpx.Timeout(600.0)) as c:
+        rr = await c.get(tgt, headers=fwd)
+
+        async def gen():
+            async for chunk in rr.aiter_bytes(256 * 1024):
+                yield chunk
+
+        hdrs = {"Content-Type": rr.headers.get("content-type", "video/mp4"),
+                "Accept-Ranges": "bytes"}
+        if "content-range" in rr.headers:
+            hdrs["Content-Range"] = rr.headers["content-range"]
+        if "content-length" in rr.headers:
+            hdrs["Content-Length"] = rr.headers["content-length"]
+        return StreamingResponse(gen(), status_code=rr.status_code, headers=hdrs)
 
 
 # ---------------- 网页后台 ----------------

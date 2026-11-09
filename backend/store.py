@@ -92,3 +92,46 @@ async def read_history() -> list:
         return []
 
     return await asyncio.to_thread(read)
+
+
+# ---------------- 频道视频索引(App 端刷视频用) ----------------
+
+VIDEO_FILE = os.path.join(config.DATA_DIR, "videos.json")
+_video_lock = asyncio.Lock()
+
+
+async def save_video(entry: dict):
+    """频道发布成功后记录 file_id 等信息,供 App 端流式播放。"""
+    async with _video_lock:
+        def write():
+            vids = []
+            if os.path.exists(VIDEO_FILE):
+                try:
+                    vids = json.load(open(VIDEO_FILE, encoding="utf-8"))
+                except Exception:
+                    vids = []
+            vids.insert(0, entry)
+            json.dump(vids[:1000], open(VIDEO_FILE, "w", encoding="utf-8"),
+                      ensure_ascii=False, indent=2)
+
+        await asyncio.to_thread(write)
+
+
+async def list_videos(limit: int = 500) -> list:
+    def read():
+        if os.path.exists(VIDEO_FILE):
+            try:
+                return json.load(open(VIDEO_FILE, encoding="utf-8"))
+            except Exception:
+                return []
+        return []
+
+    return (await asyncio.to_thread(read))[:limit]
+
+
+async def get_video(mid: int) -> dict | None:
+    vids = await list_videos(1000)
+    for v in vids:
+        if v.get("mid") == mid:
+            return v
+    return None
