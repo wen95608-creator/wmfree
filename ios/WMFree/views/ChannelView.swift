@@ -239,8 +239,10 @@ struct ChannelVideoPage: View {
         loadErr = ""
         defer { loading = false }
         do {
-            var req = URLRequest(url: URL(string: server + "/api/videos/\(video.mid)/stream")!)
-            req.timeoutInterval = 60
+            // 先拿瞬时直链 JSON(毫秒级),再让 AVPlayer 直连 Telegram CDN 流式播,
+            // 不经过服务器转发视频流量
+            var req = URLRequest(url: URL(string: server + "/api/videos/\(video.mid)/file")!)
+            req.timeoutInterval = 30
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
                 throw ApiError.server("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")

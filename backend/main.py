@@ -76,9 +76,28 @@ async def api_videos(refresh: int = 0):
     return {"videos": vids}
 
 
+@app.get("/api/videos/{mid}/file")
+async def api_video_file(mid: int):
+    """返回可播放直链的小 JSON(瞬时返回,不走视频流量):
+    bot 索引 → Bot API getFile 直链;其余 → t.me embed CDN 直链。AVPlayer 直接流播 CDN。"""
+    v = await store.get_video(mid)
+    if not v:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    if v.get("file_id"):
+        r = await tg.tg_call("getFile", data={"file_id": v["file_id"]})
+        if r.get("ok"):
+            fp = r["result"]["file_path"]
+            return {"file_url": f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{fp}"}
+    import channel_index
+    src = await channel_index.resolve_stream_url(mid)
+    if not src:
+        raise HTTPException(status_code=404, detail="无法解析视频直链")
+    return {"file_url": src}
+
+
 @app.get("/api/videos/{mid}/stream")
 async def api_video_stream(mid: int, range: str | None = Header(default=None, alias="Range")):
-    """代理 Telegram getFile 直链,AVPlayer 可流式播放(Range 透传),token 不暴露。"""
+    """Range 透传代理(备用路径)。App 主路径改走 /file 直链,此路由保留兼容。"""
     import httpx as _httpx
 
     v = await store.get_video(mid)
