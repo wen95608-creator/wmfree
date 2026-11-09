@@ -83,21 +83,50 @@ async def parse_douyin(client: httpx.AsyncClient, url: str, cookie: str | None) 
     r = await client.get(share, headers=headers, follow_redirects=True)
     m2 = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>", r.text, re.S)
     if not m2:
-        raise ParseError("抖音分享页接口未返回数据(可能被风控,稍后重试或后台配 cookie)")
+        raise ParseError("抖音分享页未返回数据(可能被风控),请稍后重试")
     try:
         data = json.loads(m2.group(1))
     except json.JSONDecodeError as e:
         raise ParseError(f"抖音数据解析失败: {e}")
 
-    # loaderData 键名随类型是 video_{id}/page 或 note_{id}/page,遍历兜底
+    def _find_items(obj):
+        """递归找第一个非空 item_list,防御 loaderData 结构变化。"""
+        if isinstance(obj, dict):
+            il = obj.get("item_list")
+            if isinstance(il, list) and il:
+                return il
+            for vv in obj.values():
+                rr = _find_items(vv)
+                if rr:
+                    return rr
+        elif isinstance(obj, list):
+            for vv in obj:
+                rr = _find_items(vv)
+                if rr:
+                    return rr
+        return None
+
+    loader = data.get("loaderData") or {}
     item = None
-    for v in (data.get("loaderData") or {}).values():
-        cand = (v.get("videoInfoRes") or {}).get("item_list") or []
+    reason = ""
+    for v in loader.values():
+        # loaderData 里可能混有 None/字符串值,不做类型防御直接 .get 会崩
+        if not isinstance(v, dict):
+            continue
+        vir = v.get("videoInfoRes")
+        if not isinstance(vir, dict):
+            continue
+        cand = vir.get("item_list") or []
         if cand:
             item = cand[0]
             break
+        if vir.get("filter_reason"):
+            reason = str(vir.get("filter_reason"))
     if not item:
-        raise ParseError("抖音接口返回为空(视频可能已删除或私密)")
+        items = _find_items(data)
+        item = items[0] if items else None
+    if not item:
+        raise ParseError(f"抖音接口返回为空{(': ' + reason) if reason else '(视频可能已删除或私密)'}")
 
     video = item.get("video") or {}
     urls = ((video.get("play_addr") or {}).get("url_list")) or []
