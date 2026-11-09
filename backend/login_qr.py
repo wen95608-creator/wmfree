@@ -136,9 +136,10 @@ def _run_session(sid: str, platform: str):
             _set(sid, state="waiting_scan",
                  image=base64.b64encode(shot).decode())
 
-            # 轮询登录态:关键 cookie 出现 = 成功;页面跳出登录域且 cookie 较多 = 兜底成功
+            # 轮询登录态:关键 cookie 出现 = 成功;页面跳出登录流程页 = 兜底成功
             deadline = time.time() + TIMEOUT_SEC
             consec_err = 0
+            last_shot = 0.0
             while time.time() < deadline:
                 if _is_cancelled(sid):
                     ctx.close()
@@ -152,13 +153,8 @@ def _run_session(sid: str, platform: str):
                         cur_url = page.url
                     except Exception:
                         cur_url = ""
-                    # 诊断信息透传给前端,卡住时能看出卡在哪一步
-                    _set(sid, diag={
-                        "url": cur_url[:150],
-                        "cookie_count": len(cookies),
-                        "cookies": names[:30],
-                    })
 
+                    # 主判定:关键登录 cookie 出现
                     if cfg["key_cookie"] in names:
                         raw = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
                         save_cookie_sync(platform, raw)
@@ -167,17 +163,30 @@ def _run_session(sid: str, platform: str):
                         browser.close()
                         return
 
-                    # 兜底:页面已跳离 sso/login 域且 cookie 明显变多,视为登录完成
-                    on_login_page = any(d in cur_url for d in (
-                        "sso.douyin.com", "/login", "passport.bilibili.com",
-                        "passport.tiktok.com"))
-                    if not on_login_page and cur_url and len(cookies) >= 10:
+                    # 兜底:页面已跳出所有登录流程页(sso/login/login_page/passport)
+                    on_login_flow = any(p in cur_url for p in (
+                        "sso.douyin.com", "/login", "login_page",
+                        "passport.", "passport.tiktok.com"))
+                    if not on_login_flow and cur_url and len(cookies) >= 10:
                         raw = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
                         save_cookie_sync(platform, raw)
                         _set(sid, state="done", cookie_names=names[:30])
                         ctx.close()
                         browser.close()
                         return
+
+                    # 诊断信息透传;每 12 秒刷新页面截图,前端可实时看到登录页状态
+                    diag = {"url": cur_url[:150],
+                            "cookie_count": len(cookies),
+                            "cookies": names[:30]}
+                    if time.time() - last_shot > 12:
+                        try:
+                            shot2 = page.screenshot(type="png")
+                            diag["image"] = base64.b64encode(shot2).decode()
+                            last_shot = time.time()
+                        except Exception:
+                            pass
+                    _set(sid, diag=diag)
                 except Exception as e:
                     consec_err += 1
                     if consec_err >= 15:
