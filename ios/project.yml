@@ -1,0 +1,31 @@
+# XcodeGen 工程定义:跑 `xcodegen generate` 自动生成 WMFree.xcodeproj
+# 原生 SwiftUI App,无任何网页套壳
+name: WMFree
+options:
+  bundleIdPrefix: cn.pursueray
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  WMFree:
+    type: application
+    platform: iOS
+    sources:
+      - WMFree
+    settings:
+      base:
+        PRODUCT_NAME: WMFree
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: WMFree/Info.plist
+      properties:
+        CFBundleDisplayName: WMFree
+        # 允许 http 明文访问 47.130.212.185(IP 直连后端)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait

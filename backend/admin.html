@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WMFree 管理后台</title>
+<style>
+:root{--bg:#0b1020;--card:#151b30;--line:#2a3352;--txt:#e7ebf5;--sub:#8b95b5;--pri:#5b7cfa;--ok:#2fb56b;--del:#e05656}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding:24px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px}
+.sub{color:var(--sub);font-size:13px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+.card h2{font-size:15px;margin-bottom:12px;color:var(--pri)}
+.row{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+input,textarea,select{background:#0e1428;border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
+input:focus,textarea:focus{border-color:var(--pri)}
+textarea{width:100%;min-height:70px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+button{background:var(--pri);border:0;border-radius:8px;color:#fff;padding:9px 18px;font-size:14px;cursor:pointer}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--sub)}
+button.del{background:transparent;border:1px solid var(--del);color:var(--del)}
+button:hover{filter:brightness(1.15)}
+.stat{display:flex;gap:8px;flex-wrap:wrap}
+.tag{padding:5px 12px;border-radius:14px;font-size:13px;border:1px solid var(--line)}
+.tag.ok{color:var(--ok);border-color:var(--ok)}
+.tag.bad{color:var(--del);border-color:var(--del)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--sub);font-weight:500}
+a{color:var(--pri);text-decoration:none}
+.hint{color:var(--sub);font-size:12px;margin-top:6px}
+#loginWrap{display:flex;justify-content:center;padding-top:15vh}
+#loginCard{width:360px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px}
+#loginCard h1{text-align:center}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="loginWrap">
+    <div id="loginCard">
+      <h1>WMFree 后台</h1>
+      <p class="sub" style="text-align:center;margin-bottom:14px">输入管理 Token</p>
+      <input id="inToken" type="password" style="width:100%" placeholder="管理 Token">
+      <button style="width:100%;margin-top:12px" onclick="login()">进入后台</button>
+      <p class="hint" style="text-align:center">Token 在服务器 /opt/wmfree/data/admin_token.txt</p>
+    </div>
+  </div>
+
+  <div id="main" class="hide">
+    <h1>WMFree 管理后台</h1>
+    <p class="sub">全平台无水印解析 · Telegram 频道自动发布 · 直接 IP 部署</p>
+
+    <div class="card">
+      <h2>运行状态</h2>
+      <div class="stat" id="stat"></div>
+      <p class="hint">机器人必须是频道管理员且有发帖权限,否则视频发不进频道。</p>
+    </div>
+
+    <div class="card">
+      <h2>平台 Cookie(需要登录的平台在这里粘贴)</h2>
+      <div class="row">
+        <select id="selPlatform"></select>
+        <button onclick="loadCookie()">读取</button>
+        <button onclick="saveCookie()">保存</button>
+        <button class="del" onclick="delCookie()">删除</button>
+      </div>
+      <textarea id="inCookie" placeholder="粘贴浏览器里复制的 Cookie 请求头,例如: k=v; k2=v2"></textarea>
+      <p class="hint">Instagram / YouTube(会员/年龄限制)/ Twitter(私密)等需要登录的平台,从浏览器开发者工具复制 Cookie 粘贴保存即可。抖音/快手配置 Cookie 可显著降低风控。</p>
+    </div>
+
+    <div class="card">
+      <h2>下载历史(最近 500 条)</h2>
+      <table><thead><tr><th>时间</th><th>来源</th><th>平台</th><th>标题</th><th>大小</th><th>频道</th></tr></thead>
+      <tbody id="histBody"><tr><td colspan="6" class="hint">加载中…</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+let TOKEN = sessionStorage.getItem("wm_token") || "";
+const $ = id => document.getElementById(id);
+async function api(path, opt={}){
+  const r = await fetch(path, {...opt, headers:{"X-Admin-Token":TOKEN, "Content-Type":"application/json", ...(opt.headers||{})}});
+  if(r.status===401){ logout(); throw new Error("未授权"); }
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.detail||("HTTP "+r.status));
+  return d;
+}
+function logout(){ TOKEN=""; sessionStorage.clear(); location.reload(); }
+
+async function login(){
+  TOKEN = $("inToken").value.trim();
+  try{
+    await api("/api/admin/overview");
+    sessionStorage.setItem("wm_token", TOKEN);
+    $("loginWrap").classList.add("hide"); $("main").classList.remove("hide");
+    refreshAll();
+  }catch(e){ alert("Token 错误:"+e.message); }
+}
+if(TOKEN){ $("inToken").value=TOKEN; login(); }
+
+async function refreshAll(){
+  try{
+    const o = await api("/api/admin/overview");
+    $("stat").innerHTML =
+      `<span class="tag ${'ok'}">Bot: @${o.bot}</span>`+
+      `<span class="tag ${o.bot_in_channel&&o.bot_can_post?'ok':'bad'}">频道 ${o.channel}: ${o.bot_can_post?"可发帖":"无发帖权限!"}</span>`;
+    $("selPlatform").innerHTML = ["douyin","kuaishou","tiktok","instagram","youtube","twitter","bilibili","facebook"].map(p=>`<option>${p}</option>`).join("");
+    loadCookie();
+    const h = await api("/api/admin/history");
+    $("histBody").innerHTML = (h.history||[]).slice(0,100).map(x=>
+      `<tr><td>${x.time}</td><td>${x.source}</td><td>${x.platform}</td><td>${(x.title||"").slice(0,40)}</td><td>${x.size_mb}MB</td><td><a href="${x.channel_link}" target="_blank">查看</a></td></tr>`).join("")
+      || '<tr><td colspan="6" class="hint">暂无记录</td></tr>';
+  }catch(e){ console.error(e); }
+}
+
+async function loadCookie(){
+  try{
+    const c = await api("/api/admin/cookies");
+    $("inCookie").value = (c.cookies||{})[$("selPlatform").value] || "";
+  }catch(e){ alert(e.message); }
+}
+async function saveCookie(){
+  try{
+    await api("/api/admin/cookies", {method:"POST", body:JSON.stringify({platform:$("selPlatform").value, cookie:$("inCookie").value})});
+    alert("已保存 "+$("selPlatform").value);
+  }catch(e){ alert(e.message); }
+}
+async function delCookie(){
+  try{
+    await api("/api/admin/cookies/"+$("selPlatform").value, {method:"DELETE"});
+    $("inCookie").value=""; alert("已删除");
+  }catch(e){ alert(e.message); }
+}
+</script>
+</body>
+</html>
