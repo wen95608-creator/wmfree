@@ -97,40 +97,46 @@ async def api_video_file(mid: int):
 
 @app.get("/api/videos/{mid}/stream")
 async def api_video_stream(mid: int, range: str | None = Header(default=None, alias="Range")):
-    """Range 透传代理(备用路径)。App 主路径改走 /file 直链,此路由保留兼容。"""
+    """视频主播放路径:真流式 Range 透传代理(国内手机无法直连 Telegram,必须走此路)。
+    client.send(stream=True) 保证首字节立即返回,视频不从服务器落盘、不全量缓冲。"""
     import httpx as _httpx
 
     v = await store.get_video(mid)
-    if v and v.get("file_id"):
+    if not v:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    if v.get("file_id"):
         r = await tg.tg_call("getFile", data={"file_id": v["file_id"]})
         if not r.get("ok"):
-            raise HTTPException(status_code=410, detail=(
-                "视频超过 20MB,Bot API 无法流式播放,请在 Telegram 频道查看。"))
+            raise HTTPException(status_code=410, detail="获取视频文件失败,请在 Telegram 频道查看。")
         fp = r["result"]["file_path"]
         tgt = f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{fp}"
-        fwd = {"Range": range} if range else {}
-        async with _httpx.AsyncClient(timeout=_httpx.Timeout(600.0)) as c:
-            rr = await c.get(tgt, headers=fwd)
+    else:
+        import channel_index
+        tgt = await channel_index.resolve_stream_url(mid)
+        if not tgt:
+            raise HTTPException(status_code=404, detail="无法解析视频直链")
 
-            async def gen():
-                async for chunk in rr.aiter_bytes(256 * 1024):
-                    yield chunk
+    fwd = {"Range": range} if range else {}
+    client = _httpx.AsyncClient(timeout=_httpx.Timeout(None, connect=30.0))
+    req = client.build_request("GET", tgt, headers=fwd)
+    rr = await client.send(req, stream=True)   # 流式打开:头立即返回,body 渐进拉取
 
-            hdrs = {"Content-Type": rr.headers.get("content-type", "video/mp4"),
-                    "Accept-Ranges": "bytes"}
-            if "content-range" in rr.headers:
-                hdrs["Content-Range"] = rr.headers["content-range"]
-            if "content-length" in rr.headers:
-                hdrs["Content-Length"] = rr.headers["content-length"]
-            return StreamingResponse(gen(), status_code=rr.status_code, headers=hdrs)
+    async def gen():
+        try:
+            async for chunk in rr.aiter_bytes(256 * 1024):
+                yield chunk
+        finally:
+            await rr.aclose()
+            await client.aclose()
 
-    # 无 file_id(手动传到频道的视频等):实时抓 t.me embed 直链,302 给播放器
-    import channel_index
-    from fastapi.responses import RedirectResponse
-    src = await channel_index.resolve_stream_url(mid)
-    if not src:
-        raise HTTPException(status_code=404, detail="无法解析该消息的视频直链")
-    return RedirectResponse(src, status_code=302)
+    hdrs = {"Content-Type": rr.headers.get("content-type", "video/mp4"),
+            "Accept-Ranges": "bytes"}
+    if "content-range" in rr.headers:
+        hdrs["Content-Range"] = rr.headers["content-range"]
+    if "content-length" in rr.headers:
+        hdrs["Content-Length"] = rr.headers["content-length"]
+    return StreamingResponse(gen(), status_code=rr.status_code, headers=hdrs)
 
 
 # ---------------- 网页后台 ----------------

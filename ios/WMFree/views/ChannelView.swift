@@ -120,7 +120,34 @@ struct VideosResponse: Codable {
     let videos: [ChannelVideo]
 }
 
-// MARK: - 单页播放器
+
+// MARK: - 单页播放器(全屏 + 保持原比例 aspectFit)
+
+/// AVPlayerLayer 宿主:支持 resizeAspect(等比不裁剪)+ frame 随布局更新
+final class PlayerContainerView: UIView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        (layer.sublayers?.first as? AVPlayerLayer)?.frame = bounds
+    }
+}
+
+struct PlayerLayerUIView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> UIView {
+        let view = PlayerContainerView()
+        let l = AVPlayerLayer()
+        l.player = player
+        l.videoGravity = .resizeAspect   // 保持原视频比例,不裁剪,全屏黑边
+        view.layer.addSublayer(l)
+        view.backgroundColor = .black
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        (uiView.layer.sublayers?.first as? AVPlayerLayer)?.frame = uiView.bounds
+    }
+}
 
 struct ChannelVideoPage: View {
     let video: ChannelVideo
@@ -128,7 +155,6 @@ struct ChannelVideoPage: View {
     let isActive: Bool
 
     @State private var player: AVPlayer?
-    @State private var fileURL: URL?
     @State private var loadErr = ""
     @State private var muted = false
     @State private var playing = false
@@ -138,12 +164,11 @@ struct ChannelVideoPage: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let url = fileURL, let pl = player {
-                VideoPlayer(player: pl)
+            if let pl = player {
+                PlayerLayerUIView(player: pl)
                     .ignoresSafeArea()
+                    .contentShape(Rectangle())
                     .onTapGesture { togglePlay() }
-            } else if !video.canStream {
-                tooLargeView
             } else if !loadErr.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -151,8 +176,12 @@ struct ChannelVideoPage: View {
                     Button("重试") { Task { await prepare() } }.buttonStyle(.bordered)
                 }
                 .padding(30)
+                .foregroundStyle(.white)
             } else {
-                ProgressView().controlSize(.large)
+                VStack(spacing: 10) {
+                    ProgressView().controlSize(.large).tint(.white)
+                    Text("连接服务器,准备播放…").font(.caption).foregroundStyle(.white.opacity(0.7))
+                }
             }
 
             // 底部信息覆盖层(TikTok 式左下角)
@@ -206,18 +235,6 @@ struct ChannelVideoPage: View {
         }
     }
 
-    private var tooLargeView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "film.stack").font(.largeTitle).foregroundStyle(.secondary)
-            Text("视频超过 20MB").font(.headline)
-            Text("Telegram Bot API 无法流式播放大文件,点击下方飞机图标在频道内观看")
-                .font(.caption).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(30)
-        .foregroundStyle(.white)
-    }
-
     private var telegramURL: URL? {
         URL(string: "https://t.me/dsfsfsdfwsdad/\(video.mid)")
     }
@@ -232,38 +249,24 @@ struct ChannelVideoPage: View {
         player?.isMuted = muted
     }
 
+    /// 直接让 AVPlayer 播服务器代理流(国内无法直连 Telegram,必须走服务器转发)。
+    /// 后端是 Range 透传真流式,AVPlayer 边下边播,不做任何全量预取。
     private func prepare() async {
         if player != nil { player?.play(); playing = true; return }
-        guard video.canStream, loading == false else { return }
+        guard loading == false else { return }
         loading = true
         loadErr = ""
         defer { loading = false }
-        do {
-            // 先拿瞬时直链 JSON(毫秒级),再让 AVPlayer 直连 Telegram CDN 流式播,
-            // 不经过服务器转发视频流量
-            var req = URLRequest(url: URL(string: server + "/api/videos/\(video.mid)/file")!)
-            req.timeoutInterval = 30
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-                throw ApiError.server("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
-            }
-            let decoded = try JSONDecoder().decode(FileURLResponse.self, from: data)
-            guard let u = URL(string: decoded.fileURL) else { throw ApiError.badURL }
-            fileURL = u
-            let pl = AVPlayer(url: u)
-            pl.isMuted = muted
-            pl.play()
-            playing = true
-            player = pl
-        } catch {
-            loadErr = error.localizedDescription
+        let url = URL(string: server.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                       + "/api/videos/\(video.mid)/stream")
+        guard let u = url else {
+            loadErr = "服务器地址无效"
+            return
         }
-    }
-}
-
-struct FileURLResponse: Codable {
-    let fileURL: String
-    enum CodingKeys: String, CodingKey {
-        case fileURL = "file_url"
+        let pl = AVPlayer(url: u)
+        pl.isMuted = muted
+        pl.play()
+        playing = true
+        player = pl
     }
 }
