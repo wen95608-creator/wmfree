@@ -111,3 +111,33 @@ async def admin_del_cookie(platform: str, x_admin_token: str = Header(default=""
 async def admin_history(x_admin_token: str = Header(default="")):
     check_admin(x_admin_token)
     return {"history": await store.read_history()}
+
+
+# ---------------- 扫码登录(Playwright 二维码 -> 自动配置 Cookie) ----------------
+
+@app.post("/api/admin/qr-login/start")
+async def qr_login_start(body: dict, x_admin_token: str = Header(default="")):
+    check_admin(x_admin_token)
+    import login_qr
+    platform = body.get("platform") or ""
+    if platform not in login_qr.LOGIN_PAGES:
+        raise HTTPException(status_code=400, detail=f"不支持扫码的平台: {platform}")
+    sid = login_qr.start_session(platform)
+    if not sid:
+        raise HTTPException(status_code=500, detail="扫码会话启动失败")
+    return {"ok": True, "session_id": sid}
+
+
+@app.get("/api/admin/qr-login/status/{sid}")
+async def qr_login_status(sid: str, x_admin_token: str = Header(default="")):
+    check_admin(x_admin_token)
+    import login_qr
+    return login_qr.status(sid)
+
+
+@app.post("/api/admin/qr-login/cancel/{sid}")
+async def qr_login_cancel(sid: str, x_admin_token: str = Header(default="")):
+    check_admin(x_admin_token)
+    import login_qr
+    login_qr.cancel(sid)
+    return {"ok": True}

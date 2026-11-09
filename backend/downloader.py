@@ -67,3 +67,23 @@ async def download_video(res: ParseResult, dest: str, cookie: str | None = None)
     else:
         path = await download_direct(res, dest + ".mp4")
     return path, os.path.basename(path)
+
+
+def probe_media(path: str) -> dict:
+    """ffprobe 验证成片:分辨率 + 音轨存在性(要求最高画质且必须有声)。"""
+    import json
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", path],
+            capture_output=True, timeout=30)
+        d = json.loads(out.stdout.decode())
+        v = [s for s in d.get("streams", []) if s.get("codec_type") == "video"]
+        a = [s for s in d.get("streams", []) if s.get("codec_type") == "audio"]
+        return {
+            "width": int(v[0].get("width") or 0) if v else 0,
+            "height": int(v[0].get("height") or 0) if v else 0,
+            "has_audio": bool(a),
+        }
+    except Exception:
+        return {"width": 0, "height": 0, "has_audio": False}

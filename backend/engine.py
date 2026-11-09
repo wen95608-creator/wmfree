@@ -103,8 +103,8 @@ async def parse_douyin(client: httpx.AsyncClient, url: str, cookie: str | None) 
     urls = ((video.get("play_addr") or {}).get("url_list")) or []
     play = ""
     if urls:
-        # playwm 是带水印地址,替换成 play 即无水印
-        play = urls[0].replace("playwm", "play")
+        # playwm 是带水印地址,替换成 play 即无水印;并强制 1080p 档保证最高画质
+        play = re.sub(r"ratio=\d+p", "ratio=1080p", urls[0].replace("playwm", "play"))
     if not play:
         uri = (video.get("play_addr") or {}).get("uri") or ""
         if uri:

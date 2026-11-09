@@ -73,7 +73,12 @@ async def process(url: str, source: str, chat_id=None, progress_msg=None):
     path, fname = await download_video(res, tmp, cookie)
 
     size_mb = os.path.getsize(path) / 1048576
-    caption = f"{res.platform} | {res.title}\nvia @{(await tg_getbotname())}"
+    # 成片验证:分辨率 + 音轨(用户要求最高画质且必须有声),写进频道 caption 便于核对
+    from downloader import probe_media
+    meta = probe_media(path)
+    res_label = f"{meta['width']}x{meta['height']}" if meta["width"] else "分辨率未知"
+    audio_label = "有声" if meta["has_audio"] else "⚠️无音轨"
+    caption = f"{res.platform} | {res.title}\n{res_label} · {audio_label} · {size_mb:.1f}MB\nvia @{(await tg_getbotname())}"
 
     if size_mb > config.MAX_TG_MB:
         # 超 50MB:yt-dlp 可降画质重下(<46MB 格式),直链没法降,只能报错

@@ -60,6 +60,25 @@ a{color:var(--pri);text-decoration:none}
     </div>
 
     <div class="card">
+      <h2>扫码登录(手机扫一下,Cookie 自动配置)</h2>
+      <div class="row">
+        <select id="qrPlatform">
+          <option value="douyin">抖音</option>
+          <option value="kuaishou">快手</option>
+          <option value="bilibili">哔哩哔哩</option>
+          <option value="tiktok">TikTok</option>
+        </select>
+        <button onclick="qrStart()">开始扫码登录</button>
+        <button class="ghost" onclick="qrCancel()">取消</button>
+      </div>
+      <div id="qrArea" class="hide" style="text-align:center">
+        <img id="qrImg" style="max-width:300px;max-height:300px;border:1px solid var(--line);border-radius:8px" alt="二维码加载中">
+        <div id="qrStatus" class="hint" style="margin-top:8px"></div>
+      </div>
+      <p class="hint">流程:点「开始扫码登录」→ 服务器打开该平台登录页并截图二维码 → 你用手机 App 扫码确认 → 登录态 Cookie 自动保存,解析时自动携带。全程无需手动复制任何东西。</p>
+    </div>
+
+    <div class="card">
       <h2>平台 Cookie(需要登录的平台在这里粘贴)</h2>
       <div class="row">
         <select id="selPlatform"></select>
@@ -134,6 +153,47 @@ async function delCookie(){
     await api("/api/admin/cookies/"+$("selPlatform").value, {method:"DELETE"});
     $("inCookie").value=""; alert("已删除");
   }catch(e){ alert(e.message); }
+}
+
+/* ---------- 扫码登录 ---------- */
+let qrTimer = null;
+let qrSid = null;
+async function qrStart(){
+  try{
+    const d = await api("/api/admin/qr-login/start", {method:"POST", body:JSON.stringify({platform:$("qrPlatform").value})});
+    qrSid = d.session_id;
+    $("qrArea").classList.remove("hide");
+    $("qrImg").src = "";
+    $("qrStatus").textContent = "启动浏览器,打开登录页…";
+    if(qrTimer) clearInterval(qrTimer);
+    qrTimer = setInterval(()=>qrPoll(qrSid), 2000);
+    qrPoll(qrSid);
+  }catch(e){ alert(e.message); }
+}
+async function qrPoll(sid){
+  try{
+    const s = await api("/api/admin/qr-login/status/"+sid);
+    if(s.image){ $("qrImg").src = "data:image/png;base64,"+s.image; }
+    if(s.state==="starting"){ $("qrStatus").textContent="启动浏览器,打开登录页…"; }
+    else if(s.state==="waiting_scan"){
+      $("qrStatus").innerHTML = "请用 <b>"+$("qrPlatform").value+"</b> App 扫描二维码并确认登录…(5 分钟有效)";
+    }
+    else if(s.state==="done"){
+      clearInterval(qrTimer);
+      $("qrStatus").innerHTML = "✅ 登录成功,Cookie 已自动配置,解析该平台时自动携带。";
+      loadCookie();
+    }
+    else if(s.state==="expired"){ clearInterval(qrTimer); $("qrStatus").textContent="⏰ 二维码已过期,请重新发起"; }
+    else if(s.state==="failed"){ clearInterval(qrTimer); $("qrStatus").textContent="❌ 失败:"+s.error; }
+    else if(s.state==="cancelled"){ clearInterval(qrTimer); $("qrStatus").textContent="已取消"; }
+  }catch(e){ /* 轮询失败静默重试 */ }
+}
+function qrCancel(){
+  if(qrTimer) clearInterval(qrTimer);
+  if(qrSid){
+    api("/api/admin/qr-login/cancel/"+qrSid, {method:"POST"}).catch(()=>{});
+  }
+  $("qrStatus").textContent = "已取消(会话 5 分钟后自动过期)";
 }
 </script>
 </body>
